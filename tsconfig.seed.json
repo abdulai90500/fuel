@@ -1,0 +1,13 @@
+// This tsconfig is only used by ts-node for the Prisma seed script.
+// It overrides the module system to CommonJS so ts-node can run without ESM issues.
+{
+  "compilerOptions": {
+    "module": "CommonJS",
+    "target": "ES2017",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "paths": {
+      "@/*": ["./*"]
+    }
+  }
+}

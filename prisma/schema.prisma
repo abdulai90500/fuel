@@ -1,0 +1,59 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  DRIVER
+  ADMIN
+  ATTENDANT
+}
+
+enum RequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  COMPLETED
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  password      String
+  role          Role      @default(DRIVER)
+  
+  requests      FuelRequest[] @relation("DriverRequests")
+  approvals     FuelRequest[] @relation("AdminApprovals")
+  dispenses     FuelRequest[] @relation("AttendantDispenses")
+  
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model FuelRequest {
+  id            String        @id @default(cuid())
+  vehiclePlate  String
+  fuelType      String
+  amount        Float
+  status        RequestStatus @default(PENDING)
+  
+  driverId      String
+  driver        User          @relation("DriverRequests", fields: [driverId], references: [id])
+  
+  adminId       String?
+  admin         User?         @relation("AdminApprovals", fields: [adminId], references: [id])
+  
+  attendantId   String?
+  attendant     User?         @relation("AttendantDispenses", fields: [attendantId], references: [id])
+  
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+}
