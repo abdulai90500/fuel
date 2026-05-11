@@ -6,8 +6,22 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  DRIVER
+  ADMIN
+  ATTENDANT
+}
+
+enum RequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  COMPLETED
 }
 
 model User {
@@ -15,7 +29,7 @@ model User {
   name          String?
   email         String    @unique
   password      String
-  role          String    @default("DRIVER")
+  role          Role      @default(DRIVER)
   
   requests      FuelRequest[] @relation("DriverRequests")
   approvals     FuelRequest[] @relation("AdminApprovals")
@@ -30,7 +44,7 @@ model FuelRequest {
   vehiclePlate  String
   fuelType      String
   amount        Float
-  status        String        @default("PENDING")
+  status        RequestStatus @default(PENDING)
   
   driverId      String
   driver        User          @relation("DriverRequests", fields: [driverId], references: [id])
