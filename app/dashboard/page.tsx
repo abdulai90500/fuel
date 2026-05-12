@@ -3,22 +3,34 @@ import { redirect } from 'next/navigation'
 import { authOptions } from '@/lib/auth'
 import prisma from '@/lib/prisma'
 import { Fuel, ClipboardList, CheckCircle, Clock, XCircle, TrendingUp } from 'lucide-react'
+import AnalyticsChart from '@/components/dashboard/AnalyticsChart'
+import StatusBadge from '@/components/dashboard/StatusBadge'
 
 async function getStats(userId: string, role: string) {
+  // Fetch common stats
   if (role === 'DRIVER') {
-    const [total, pending, approved, completed, rejected] = await Promise.all([
+    const [total, pending, approved, completed, rejected, totalAmount] = await Promise.all([
       prisma.fuelRequest.count({ where: { driverId: userId } }),
       prisma.fuelRequest.count({ where: { driverId: userId, status: 'PENDING' } }),
       prisma.fuelRequest.count({ where: { driverId: userId, status: 'APPROVED' } }),
       prisma.fuelRequest.count({ where: { driverId: userId, status: 'COMPLETED' } }),
       prisma.fuelRequest.count({ where: { driverId: userId, status: 'REJECTED' } }),
+      prisma.fuelRequest.aggregate({
+        where: { driverId: userId, status: { in: ['APPROVED', 'COMPLETED'] } },
+        _sum: { amount: true }
+      })
     ])
     const recentRequests = await prisma.fuelRequest.findMany({
       where: { driverId: userId },
       orderBy: { createdAt: 'desc' },
       take: 5,
     })
-    return { total, pending, approved, completed, rejected, recentRequests }
+    return { 
+      total, pending, approved, completed, rejected, 
+      recentRequests, 
+      trend: [], 
+      totalLitres: totalAmount._sum.amount || 0 
+    }
   }
 
   if (role === 'ADMIN') {
@@ -29,12 +41,40 @@ async function getStats(userId: string, role: string) {
       prisma.fuelRequest.count({ where: { status: 'COMPLETED' } }),
       prisma.fuelRequest.count({ where: { status: 'REJECTED' } }),
     ])
+
+    // Get trend data for last 7 days
+    const days = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date()
+      d.setDate(d.getDate() - (6 - i))
+      d.setHours(0, 0, 0, 0)
+      return d
+    })
+
+    const trend = await Promise.all(
+      days.map(async (date) => {
+        const nextDate = new Date(date)
+        nextDate.setDate(date.getDate() + 1)
+        const count = await prisma.fuelRequest.count({
+          where: {
+            createdAt: {
+              gte: date,
+              lt: nextDate,
+            },
+          },
+        })
+        return {
+          name: date.toLocaleDateString('en-US', { weekday: 'short' }),
+          count,
+        }
+      })
+    )
+
     const recentRequests = await prisma.fuelRequest.findMany({
       include: { driver: { select: { name: true } } },
       orderBy: { createdAt: 'desc' },
       take: 5,
     })
-    return { total, pending, approved, completed, rejected, recentRequests }
+    return { total, pending, approved, completed, rejected, recentRequests, trend }
   }
 
   // ATTENDANT
@@ -49,16 +89,9 @@ async function getStats(userId: string, role: string) {
     orderBy: { createdAt: 'desc' },
     take: 5,
   })
-  return { total, pending: approved, approved, completed, rejected: 0, recentRequests }
+  return { total, pending: approved, approved, completed, rejected: 0, recentRequests, trend: [] }
 }
 
-function StatusBadge({ status }: { status: string }) {
-  return (
-    <span className={`badge badge-${status.toLowerCase()}`}>
-      {status}
-    </span>
-  )
-}
 
 function formatDate(d: Date) {
   return new Date(d).toLocaleDateString('en-US', {
@@ -83,7 +116,7 @@ export default async function DashboardPage() {
       { label: 'Total Requests', value: stats.total, icon: <ClipboardList size={20} />, color: 'blue' },
       { label: 'Pending', value: stats.pending, icon: <Clock size={20} />, color: 'orange' },
       { label: 'Approved', value: stats.approved, icon: <CheckCircle size={20} />, color: 'green' },
-      { label: 'Completed', value: stats.completed, icon: <Fuel size={20} />, color: 'blue' },
+      { label: 'Litres Received', value: (stats as any).totalLitres, icon: <Fuel size={20} />, color: 'purple' },
     ],
     ADMIN: [
       { label: 'Total Requests', value: stats.total, icon: <ClipboardList size={20} />, color: 'blue' },
@@ -132,6 +165,70 @@ export default async function DashboardPage() {
           </div>
         ))}
       </div>
+
+      {/* Notification Banner for Admins */}
+      {role === 'ADMIN' && stats.pending > 0 && (
+        <div 
+          className="card mb-4" 
+          style={{ 
+            background: 'rgba(59,130,246,0.05)', 
+            border: '1px solid var(--accent-blue)',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            padding: '1rem 1.5rem'
+          }}
+        >
+          <div className="flex items-center gap-3">
+            <div className="stat-icon bg-blue" style={{ width: '32px', height: '32px' }}>
+              <Clock size={16} className="text-blue" />
+            </div>
+            <p style={{ fontWeight: 600, fontSize: '0.9rem' }}>
+              You have {stats.pending} pending fuel requests awaiting your approval.
+            </p>
+          </div>
+          <a href="/dashboard/approvals" className="btn btn-primary btn-sm">
+            Review Now
+          </a>
+        </div>
+      )}
+
+      {/* Notification Banner for Drivers */}
+      {role === 'DRIVER' && stats.approved > 0 && (
+        <div 
+          className="card mb-4" 
+          style={{ 
+            background: 'rgba(34,197,94,0.05)', 
+            border: '1px solid var(--accent-green)',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            padding: '1rem 1.5rem'
+          }}
+        >
+          <div className="flex items-center gap-3">
+            <div className="stat-icon bg-green" style={{ width: '32px', height: '32px' }}>
+              <CheckCircle size={16} className="text-green" />
+            </div>
+            <p style={{ fontWeight: 600, fontSize: '0.9rem' }}>
+              Great news! {stats.approved} of your requests have been approved and are ready for dispense.
+            </p>
+          </div>
+          <a href="/dashboard/my-requests" className="btn btn-success btn-sm" style={{ background: 'var(--accent-green)', color: 'white' }}>
+            View Requests
+          </a>
+        </div>
+      )}
+
+      {/* Analytics Chart (Only for Admin) */}
+      {role === 'ADMIN' && stats.trend.length > 0 && (
+        <div className="card mb-4">
+          <div className="card-header">
+            <h2 className="card-title">Weekly Request Trends</h2>
+          </div>
+          <AnalyticsChart data={stats.trend} />
+        </div>
+      )}
 
       {/* Recent Activity */}
       <div className="card">

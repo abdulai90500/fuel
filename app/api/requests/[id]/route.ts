@@ -18,8 +18,8 @@ export async function PATCH(
     const userId = (session.user as any).id
     const { id } = await params
     const body = await req.json()
-    const { action } = body
-
+    const { action, amount } = body
+    
     // Verify request exists
     const existing = await prisma.fuelRequest.findUnique({ where: { id } })
     if (!existing) {
@@ -40,6 +40,7 @@ export async function PATCH(
         data: {
           status: action === 'approve' ? 'APPROVED' : 'REJECTED',
           adminId: userId,
+          amount: (action === 'approve' && amount) ? Number(amount) : existing.amount,
         },
       })
       return NextResponse.json(updated)

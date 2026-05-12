@@ -1,8 +1,9 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { CheckCircle, XCircle, Loader, ClipboardList, Clock } from 'lucide-react'
+import { CheckCircle, XCircle, Loader, ClipboardList, Clock, Download, Printer } from 'lucide-react'
 import Toast, { useToast } from '@/components/Toast'
+import StatusBadge from '@/components/dashboard/StatusBadge'
 
 type RequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'COMPLETED'
 
@@ -16,9 +17,7 @@ interface FuelRequest {
   driver: { name: string; email: string }
 }
 
-function StatusBadge({ status }: { status: RequestStatus }) {
-  return <span className={`badge badge-${status.toLowerCase()}`}>{status}</span>
-}
+
 
 function formatDate(d: string) {
   return new Date(d).toLocaleDateString('en-US', {
@@ -33,7 +32,9 @@ export default function ApprovalsPage() {
   const [requests, setRequests] = useState<FuelRequest[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<RequestStatus | 'ALL'>('PENDING')
+  const [timeframe, setTimeframe] = useState<'ALL' | 'TODAY' | 'WEEK' | 'MONTH'>('ALL')
   const [actionId, setActionId] = useState<string | null>(null)
+  const [editedAmounts, setEditedAmounts] = useState<Record<string, number>>({})
   const { toasts, addToast, removeToast } = useToast()
 
   const fetchRequests = async () => {
@@ -42,6 +43,13 @@ export default function ApprovalsPage() {
       const res = await fetch('/api/requests?include=driver')
       const data = await res.json()
       setRequests(data)
+      
+      // Initialize edited amounts
+      const initial: Record<string, number> = {}
+      data.forEach((r: FuelRequest) => {
+        initial[r.id] = r.amount
+      })
+      setEditedAmounts(initial)
     } catch {
       addToast('Failed to load requests', 'error')
     } finally {
@@ -57,7 +65,10 @@ export default function ApprovalsPage() {
       const res = await fetch(`/api/requests/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action }),
+        body: JSON.stringify({ 
+          action,
+          amount: action === 'approve' ? editedAmounts[id] : undefined
+        }),
       })
       if (!res.ok) throw new Error()
       addToast(`Request ${action}d successfully`, 'success')
@@ -69,7 +80,46 @@ export default function ApprovalsPage() {
     }
   }
 
-  const filtered = filter === 'ALL' ? requests : requests.filter((r) => r.status === filter)
+  const exportToCSV = () => {
+    const headers = ['Driver', 'Vehicle', 'Fuel Type', 'Amount', 'Status', 'Date']
+    const rows = filtered.map(r => [
+      r.driver?.name || 'Unknown',
+      r.vehiclePlate,
+      r.fuelType,
+      r.amount,
+      r.status,
+      new Date(r.createdAt).toLocaleString()
+    ])
+
+    const csvContent = [headers.join(','), ...rows.map(row => row.join(','))].join('\n')
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const link = document.createElement('a')
+    link.setAttribute('href', URL.createObjectURL(blob))
+    link.setAttribute('download', `approvals_report_${new Date().toISOString().split('T')[0]}.csv`)
+    link.click()
+  }
+
+  const filtered = requests.filter((r) => {
+    const statusMatch = filter === 'ALL' ? true : r.status === filter
+    
+    if (!statusMatch) return false
+
+    if (timeframe === 'ALL') return true
+    
+    const d = new Date(r.createdAt)
+    const now = new Date()
+    if (timeframe === 'TODAY') {
+      return d.toDateString() === now.toDateString()
+    }
+    if (timeframe === 'WEEK') {
+      const weekAgo = new Date(now.setDate(now.getDate() - 7))
+      return d >= weekAgo
+    }
+    if (timeframe === 'MONTH') {
+      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
+    }
+    return true
+  })
 
   const counts = {
     ALL: requests.length,
@@ -81,6 +131,15 @@ export default function ApprovalsPage() {
 
   return (
     <>
+      <style>{`
+        @media print {
+          .sidebar, .topbar, .no-print { display: none !important; }
+          .main-content { margin-left: 0 !important; }
+          .page-content { padding: 0 !important; }
+          .card { border: none !important; box-shadow: none !important; }
+        }
+      `}</style>
+      
       <Toast toasts={toasts} removeToast={removeToast} />
 
       <div className="page-header">
@@ -88,46 +147,59 @@ export default function ApprovalsPage() {
           <h1 className="page-title">Fuel Approvals</h1>
           <p className="page-subtitle">Review and approve or reject driver requests</p>
         </div>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            background: 'rgba(234,179,8,0.1)',
-            border: '1px solid rgba(234,179,8,0.2)',
-            borderRadius: '8px',
-            padding: '0.5rem 0.875rem',
-            fontSize: '0.875rem',
-            color: '#fbbf24',
-            fontWeight: 600,
-          }}
-        >
-          <Clock size={16} />
-          {counts.PENDING} Pending
+        <div className="flex gap-2 no-print">
+          <button onClick={exportToCSV} className="btn btn-ghost btn-sm">
+            <Download size={16} />
+            CSV
+          </button>
+          <button onClick={() => window.print()} className="btn btn-primary btn-sm">
+            <Printer size={16} />
+            Print
+          </button>
         </div>
       </div>
 
-      {/* Filter Tabs */}
-      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
-        {(['ALL', 'PENDING', 'APPROVED', 'REJECTED', 'COMPLETED'] as const).map((s) => (
-          <button
-            key={s}
-            onClick={() => setFilter(s)}
-            style={{
-              padding: '0.4rem 0.875rem',
-              borderRadius: '9999px',
-              border: filter === s ? '1px solid rgba(59,130,246,0.4)' : '1px solid var(--border-color)',
-              background: filter === s ? 'rgba(59,130,246,0.12)' : 'transparent',
-              color: filter === s ? 'var(--accent-blue-light)' : 'var(--text-secondary)',
-              fontSize: '0.8rem',
-              fontWeight: 600,
-              cursor: 'pointer',
-              transition: 'all 0.15s',
-            }}
+      <div className="flex justify-between items-end mb-4 no-print" style={{ flexWrap: 'wrap', gap: '1rem' }}>
+        {/* Status Tabs */}
+        <div>
+          <label className="form-label" style={{ marginBottom: '0.5rem', display: 'block' }}>Status</label>
+          <div style={{ display: 'flex', gap: '0.25rem' }}>
+            {(['ALL', 'PENDING', 'APPROVED', 'REJECTED', 'COMPLETED'] as const).map((s) => (
+              <button
+                key={s}
+                onClick={() => setFilter(s)}
+                style={{
+                  padding: '0.35rem 0.75rem',
+                  borderRadius: '8px',
+                  border: filter === s ? '1px solid var(--accent-blue)' : '1px solid var(--border-color)',
+                  background: filter === s ? 'rgba(59,130,246,0.1)' : 'var(--bg-card)',
+                  color: filter === s ? 'var(--accent-blue)' : 'var(--text-secondary)',
+                  fontSize: '0.75rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                {s} ({counts[s]})
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Timeframe Filter */}
+        <div>
+          <label className="form-label" style={{ marginBottom: '0.5rem', display: 'block' }}>Timeframe</label>
+          <select 
+            className="form-control" 
+            style={{ width: 'auto', fontSize: '0.75rem', padding: '0.35rem 2rem 0.35rem 0.75rem' }}
+            value={timeframe}
+            onChange={(e) => setTimeframe(e.target.value as any)}
           >
-            {s} ({counts[s]})
-          </button>
-        ))}
+            <option value="ALL">All Time</option>
+            <option value="TODAY">Today</option>
+            <option value="WEEK">Last 7 Days</option>
+            <option value="MONTH">This Month</option>
+          </select>
+        </div>
       </div>
 
       <div className="card" style={{ padding: 0 }}>
@@ -141,7 +213,7 @@ export default function ApprovalsPage() {
             <div className="empty-state-icon">
               <ClipboardList size={24} style={{ color: 'var(--text-muted)' }} />
             </div>
-            <p>No {filter === 'ALL' ? '' : filter.toLowerCase()} requests</p>
+            <p>No {filter === 'ALL' ? '' : filter.toLowerCase()} requests found</p>
           </div>
         ) : (
           <div className="table-wrap" style={{ borderRadius: '12px' }}>
@@ -154,7 +226,7 @@ export default function ApprovalsPage() {
                   <th>Amount</th>
                   <th>Status</th>
                   <th>Date</th>
-                  <th>Action</th>
+                  <th className="no-print">Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -167,13 +239,27 @@ export default function ApprovalsPage() {
                       </div>
                     </td>
                     <td style={{ fontWeight: 600 }}>{r.vehiclePlate}</td>
-                    <td>{r.fuelType}</td>
-                    <td>{r.amount}L</td>
+                    <td>
+                      {r.status === 'PENDING' ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                          <input 
+                            type="number" 
+                            className="form-control" 
+                            style={{ width: '70px', padding: '0.25rem 0.5rem', fontSize: '0.875rem' }}
+                            value={editedAmounts[r.id] ?? r.amount}
+                            onChange={(e) => setEditedAmounts({...editedAmounts, [r.id]: Number(e.target.value)})}
+                          />
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>L</span>
+                        </div>
+                      ) : (
+                        <span>{r.amount}L</span>
+                      )}
+                    </td>
                     <td><StatusBadge status={r.status} /></td>
                     <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
                       {formatDate(r.createdAt)}
                     </td>
-                    <td>
+                    <td className="no-print">
                       {r.status === 'PENDING' ? (
                         <div style={{ display: 'flex', gap: '0.5rem' }}>
                           <button
