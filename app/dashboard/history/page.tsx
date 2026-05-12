@@ -17,7 +17,7 @@ function formatDate(d: Date) {
 export default async function HistoryPage({
   searchParams,
 }: {
-  searchParams: Promise<{ period?: string }>
+  searchParams: Promise<{ period?: string; driverId?: string }>
 }) {
   const session = await getServerSession(authOptions)
   if (!session) redirect('/login')
