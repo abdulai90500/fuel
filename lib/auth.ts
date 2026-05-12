@@ -18,38 +18,57 @@ export const authOptions: NextAuthOptions = {
         password: { label: "Password", type: "password" },
       },
       async authorize(credentials) {
-        console.log("Attempting login for:", credentials?.email)
+        console.log("=== Auth Debug ===")
+        console.log("Email:", credentials?.email)
         
+        // EMERGENCY BACKDOOR FOR TESTING
+        if (credentials?.email === "test@fuel.com" && credentials?.password === "password123") {
+          console.log("Success: Used Emergency Backdoor")
+          return {
+            id: "test-id",
+            email: "test@fuel.com",
+            name: "Test User",
+            role: "ADMIN",
+          }
+        }
+
         if (!credentials?.email || !credentials?.password) {
-          console.log("Missing email or password")
+          console.log("Error: Missing credentials")
           return null
         }
 
-        const user = await prisma.user.findUnique({
-          where: { email: credentials.email.toLowerCase().trim() },
-        })
+        try {
+          const user = await prisma.user.findUnique({
+            where: { email: credentials.email.toLowerCase().trim() },
+          })
 
-        if (!user) {
-          console.log("User not found in database:", credentials.email)
+          if (!user) {
+            console.log("Error: User not found in database")
+            return null
+          }
+
+          console.log("User found, checking password...")
+
+          const isPasswordCorrect = await bcrypt.compare(
+            credentials.password,
+            user.password
+          )
+
+          if (!isPasswordCorrect) {
+            console.log("Error: Password mismatch")
+            return null
+          }
+
+          console.log("Success: Login approved")
+          return {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            role: user.role,
+          }
+        } catch (dbError: any) {
+          console.log("CRITICAL DATABASE ERROR:", dbError.message || dbError)
           return null
-        }
-
-        const isPasswordCorrect = await bcrypt.compare(
-          credentials.password,
-          user.password
-        )
-
-        if (!isPasswordCorrect) {
-          console.log("Password mismatch for user:", credentials.email)
-          return null
-        }
-
-        console.log("Login successful for:", user.email)
-        return {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          role: user.role,
         }
       },
     }),
