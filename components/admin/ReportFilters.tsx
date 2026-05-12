@@ -3,7 +3,7 @@
 import { useRouter, useSearchParams } from 'next/navigation'
 
 interface ReportFiltersProps {
-  drivers: { id: string; name: string }[]
+  drivers: { id: string; name: string | null }[]
 }
 
 export default function ReportFilters({ drivers }: ReportFiltersProps) {
@@ -57,7 +57,7 @@ export default function ReportFilters({ drivers }: ReportFiltersProps) {
       >
         <option value="all">All Drivers</option>
         {drivers.map(d => (
-          <option key={d.id} value={d.id}>{d.name}</option>
+          <option key={d.id} value={d.id}>{d.name || 'Unknown Driver'}</option>
         ))}
       </select>
     </div>
